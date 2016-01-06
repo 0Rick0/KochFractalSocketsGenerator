@@ -206,10 +206,8 @@ public class KochManager{
                 socketOutput.writeByte(0x02);//write at end
                 cacheFile.seek(location.getStart());
                 
-                byte[] buffer = new byte[1024];
-                int len;
-                while ((len = cacheFile.read(buffer)) != -1) {
-                    socketOutput.write(buffer, 0, len);
+                for(int i = 0; i < location.getLength();i++){
+                    socketOutput.writeByte(cacheFile.read());
                 }
                 
             }
