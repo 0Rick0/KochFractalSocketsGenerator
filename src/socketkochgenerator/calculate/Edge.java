@@ -3,7 +3,7 @@
  * and open the template in the editor.
  */
 
-package calculate;
+package socketkochgenerator.calculate;
 
 import javafx.scene.paint.Color;
 

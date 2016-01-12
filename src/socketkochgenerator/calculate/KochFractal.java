@@ -2,7 +2,7 @@
  * To change this template, choose Tools | Templates
  * and open the template in the editor.
  */
-package calculate;
+package socketkochgenerator.calculate;
 
 import java.util.Observable;
 import java.util.concurrent.CountDownLatch;
