@@ -13,6 +13,7 @@ import java.util.List;
 import java.util.Scanner;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import socketkochgenerator.CacheManager.CacheManager;
 import socketkochgenerator.calculate.KochManager;
 
 /**
@@ -53,12 +54,15 @@ public class main {
                 System.out.println("\tquit\tstop the server");
                 System.out.println("\tstats\tshow statistics of the server");
             } else if (input.equalsIgnoreCase("quit")) {
+                CacheManager.getInstance().stop();
                 System.exit(0);
             } else if (input.equalsIgnoreCase("stats")) {
                 System.out.println("WIP");
                 System.out.println("Cleaning up");
                 activeManagers.removeIf((m) -> m.notActive());
                 System.out.println("Active clients: " + activeManagers.size());
+            } else if(input.equalsIgnoreCase("levels")){
+                System.out.println("Amount of levels: " + CacheManager.getInstance().getLevels());
             } else {
                 System.out.println("Unkown command '" + input + "'");
             }
@@ -70,6 +74,7 @@ public class main {
         Socket conn;
 
         while ((conn = server.accept()) != null) {
+            System.out.println("New client!" + conn.getInetAddress());
             activeManagers.add(new KochManager(conn));
         }
     }

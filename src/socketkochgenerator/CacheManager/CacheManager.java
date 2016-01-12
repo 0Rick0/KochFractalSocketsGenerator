@@ -12,6 +12,7 @@ import java.io.RandomAccessFile;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -38,6 +39,7 @@ public class CacheManager {
     private File location;
 
     public CacheManager() {
+        
         boolean newFile;
         location = new File(System.getProperty("user.home") + File.separator + "edgesCache.edg");
         newFile = !location.exists();
@@ -46,6 +48,7 @@ public class CacheManager {
         } catch (FileNotFoundException ex) {
             LOG.log(Level.SEVERE, null, ex);
         }
+        
         if(newFile){
             try {
                 createTable();
@@ -83,6 +86,7 @@ public class CacheManager {
      * ALL DATA IS LOST
      */
     private void createTable() throws IOException{
+        getWriter();
         file.seek(0);
         for(int i = 0; i<0x1000; i++){
             file.write(0x00);
@@ -93,6 +97,18 @@ public class CacheManager {
         file.writeChar('E');
         file.writeInt(0x1000);//first free byte
         file.write(0x00);//no levels
+        releaseWriter();
+    }
+    
+    private void refreshHeader(int firstFreeByte, byte levelCount) throws IOException{
+        getWriter();
+        file.seek(0);
+        file.writeChar('R');//header
+        file.writeChar('D');
+        file.writeChar('E');
+        file.writeInt(firstFreeByte);//first free byte
+        file.write(levelCount);//no levels
+        releaseWriter();
     }
     
     /**
@@ -123,13 +139,16 @@ public class CacheManager {
         
         try {
             //write to file
+            getWriter();
             file.writeByte((byte)level);
             file.writeInt(block.getStart());
             file.writeInt(block.getLength());
+            lastPos = file.getFilePointer();
+            releaseWriter();
         } catch (IOException ex) {
             LOG.log(Level.SEVERE, null, ex);
         }
-        
+        levelCount++;
         //register block
         edgeLocationBlocks.add(block);
         
@@ -142,5 +161,53 @@ public class CacheManager {
     
     private int calcSize(int level){
         return (int)((3*Math.pow(4, level - 1))*56+1);
+    }
+    
+    private AtomicBoolean writerAvailable = new AtomicBoolean(true);
+    private long lastPos = 0;
+    
+    public RandomAccessFile getWriter(){
+        synchronized(writerAvailable){
+            if(!writerAvailable.get()){
+                try {
+                    writerAvailable.wait();
+                } catch (InterruptedException ex) {
+                    Logger.getLogger(CacheManager.class.getName()).log(Level.SEVERE, null, ex);
+                }
+            }
+        }
+        writerAvailable.set(false);
+        try {
+            lastPos = file.getFilePointer();
+        } catch (IOException ex) {
+            Logger.getLogger(CacheManager.class.getName()).log(Level.SEVERE, null, ex);
+        }
+        return file;
+    }
+    
+    public void releaseWriter(){
+        try {
+            file.seek(lastPos);
+        } catch (IOException ex) {
+            Logger.getLogger(CacheManager.class.getName()).log(Level.SEVERE, null, ex);
+        }
+        synchronized(writerAvailable){
+            writerAvailable.set(true);
+            writerAvailable.notify();
+        }
+    }
+    
+    public void stop(){
+        try {
+            refreshHeader(firstFreeByte, (byte) levelCount);
+            getWriter();
+            file.close();
+        } catch (IOException ex) {
+            Logger.getLogger(CacheManager.class.getName()).log(Level.SEVERE, null, ex);
+        }
+    }
+
+    public int getLevels() {
+        return levelCount;
     }
 }

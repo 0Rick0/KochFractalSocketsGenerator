@@ -5,6 +5,7 @@
  */
 package socketkochgenerator.calculate;
 
+import java.io.DataInputStream;
 import java.io.DataOutput;
 import java.io.DataOutputStream;
 import java.io.File;
@@ -13,9 +14,11 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.ObjectInputStream;
+import java.io.ObjectOutputStream;
 import java.io.OutputStream;
 import java.io.RandomAccessFile;
 import java.net.Socket;
+import java.nio.channels.FileLock;
 import java.nio.file.CopyOption;
 import java.nio.file.Files;
 import java.util.LinkedList;
@@ -57,9 +60,8 @@ public class KochManager {
     private ExecutorService pool;
     private CountDownLatch lat;
 
-    private RandomAccessFile cacheFile;
-
     private Socket socket;
+    private DataOutputStream objOut;
 
     private Thread listenerThread;
 
@@ -67,13 +69,6 @@ public class KochManager {
     Runnable rEnd;
 
     public KochManager(Socket s) {
-
-        try {
-            cacheFile = new RandomAccessFile(CacheManager.getInstance().getLocation(), "r");
-        } catch (FileNotFoundException ex) {
-            Logger.getLogger(KochManager.class.getName()).log(Level.SEVERE, null, ex);
-            return;
-        }
 
         socket = s;
 
@@ -90,57 +85,71 @@ public class KochManager {
     }
 
     private void socketHandler() {
+        
         OutputStream out;
-        InputStream in;
-        ObjectInputStream objIn;
+        DataInputStream objIn;
+        
+        
+        System.out.println("Writing header!");
+        try {
+            objOut = new DataOutputStream(socket.getOutputStream());
+            objOut.writeUTF("RDES");//identify server
+            objOut.flush();
+        } catch (IOException ex) {
+            Logger.getLogger(KochManager.class.getName()).log(Level.SEVERE, null, ex);
+        }
         try {
             out = socket.getOutputStream();
-            in = socket.getInputStream();
-            objIn = new ObjectInputStream(in);
+            objIn = new DataInputStream(socket.getInputStream());
         } catch (IOException ex) {
             Logger.getLogger(KochManager.class.getName()).log(Level.SEVERE, null, ex);
             return;
         }
-        try {
-            out.write("RDES".getBytes());//identify server
-        } catch (IOException ex) {
-            Logger.getLogger(KochManager.class.getName()).log(Level.SEVERE, null, ex);
-        }
+        System.out.println("Waiting input");
         while (!socket.isClosed() && socket.isConnected()) {
             try {
-                int val = in.read();
+                int val = objIn.readByte();
                 switch (val) {
                     case 0x01://draw edges direct write
+                        System.out.println("Writing direct");
                         changeLevel(objIn.readByte());
 
                         EdgeLocationBlock location = CacheManager.getInstance().getLevelOffset(level);
                         if (location == null) {
+                            System.out.println("Calculated");
                             location = CacheManager.getInstance().creaeNewLevel(level);
                             calculate(OutputMode.DIRECT_WRITE, objIn.readDouble(),location);
                         }else{
+                            System.out.println("From cache");
                             writeFromCache(location,objIn.readDouble());
                         }
+                        System.out.println("Done");
                         break;
                     case 0x02://draw edges chached write
-
+                        System.out.println("Writing Cached");
                         changeLevel(objIn.readByte());
                         
                         EdgeLocationBlock location2 = CacheManager.getInstance().getLevelOffset(level);
                         if (location2 == null) {
+                            System.out.println("Calculated");
                             location2 = CacheManager.getInstance().creaeNewLevel(level);
                             calculate(OutputMode.CACHE_WRITE, objIn.readDouble(),location2);
                         }else{
+                            System.out.println("From cache");
                             writeFromCache(location2,objIn.readDouble());
                         }
+                        System.out.println("Done");
                         break;
                     default:
                         out.write(0xFF);//ERROR
+                        System.out.println("Error");
                         break;
                 }
             } catch (IOException ex) {
                 Logger.getLogger(KochManager.class.getName()).log(Level.SEVERE, null, ex);
             }
         }
+        System.out.println("Quiting");
     }
 
     public void changeLevel(int value) {
@@ -153,14 +162,15 @@ public class KochManager {
         pool = Executors.newFixedThreadPool(3);
         System.out.println("Generating edges " + kf.getNrOfEdges() + " for level " + kf.getLevel());
 
+        RandomAccessFile cacheFile = CacheManager.getInstance().getWriter();
         
         DataOutputStream socketOutput;
         try {
             cacheFile.seek(location.getStart());
             cacheFile.writeByte(level);
 
-            socketOutput = new DataOutputStream(socket.getOutputStream());
-
+            //socketOutput = new DataOutputStream(socket.getOutputStream());
+            socketOutput = objOut;
             if (outputMode == OutputMode.DIRECT_WRITE) {
                 socketOutput.writeByte(0x01);//direct write level started caculating
                 socketOutput.writeByte(level);//send the level
@@ -230,16 +240,20 @@ public class KochManager {
             //write data from cache to outputstream if in cache write mode
             if (outputMode == OutputMode.CACHE_WRITE) {
                 writeFromCache(location, zoom);
+            }else{
+                socketOutput.flush();
             }
 
             pool.shutdown();
+            CacheManager.getInstance().releaseWriter();
         } catch (InterruptedException | IOException ex) {
             Logger.getLogger(KochManager.class.getName()).log(Level.SEVERE, null, ex);
         }
     }
 
     private void writeFromCache(EdgeLocationBlock location, double zoom) throws IOException {
-        DataOutput socketOutput = new DataOutputStream(socket.getOutputStream());
+        RandomAccessFile cacheFile = new RandomAccessFile(CacheManager.getInstance().getLocation(),"r");
+        DataOutputStream socketOutput = new DataOutputStream(socket.getOutputStream());
         socketOutput.writeByte(0x02);//write from cache
         cacheFile.seek(location.getStart());
 
@@ -249,6 +263,7 @@ public class KochManager {
                     cacheFile.readDouble(), cacheFile.readDouble(), cacheFile.readDouble(), //hsb
                     zoom), socketOutput);//write all edges
         }
+        socketOutput.flush();
     }
 
     private void write(Edge e, DataOutput dout) throws IOException {
