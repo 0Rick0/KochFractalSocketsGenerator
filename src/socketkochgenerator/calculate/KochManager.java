@@ -37,6 +37,10 @@ import socketkochgenerator.CacheManager.EdgeLocationBlock;
  */
 public class KochManager {
 
+    public boolean notActive() {
+        return socket.isConnected() && !socket.isClosed();
+    }
+
     public static enum OutputMode {
         DIRECT_WRITE,
         CACHE_WRITE
